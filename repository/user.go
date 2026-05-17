@@ -11,6 +11,8 @@ type UserRepository interface {
 	GetAll() ([]models.User, error)
 	Create(user models.User) (models.User, error)
 	Delete(id string) error
+	GetByID(id string) (models.User, error)
+	Update(user models.User) (models.User, error)
 }
 
 // actual implementation
@@ -40,4 +42,16 @@ func (r *userRepo) Create(user models.User) (models.User, error) {
 func (r *userRepo) Delete(id string) error {
 	result := r.db.Unscoped().Delete(&models.User{}, "id = ?", id)
 	return result.Error
+}
+
+func (r *userRepo) GetByID(id string) (models.User, error) {
+	var user models.User
+	result := r.db.First(&user, "id = ?", id)
+	return user, result.Error
+}
+
+// update user
+func (r *userRepo) Update(user models.User) (models.User, error) {
+	result := r.db.Save(&user)
+	return user, result.Error
 }

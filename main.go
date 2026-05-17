@@ -36,6 +36,8 @@ func main() {
 			userHandler.CreateUser(w, r)
 		}
 	})
+	mux.HandleFunc("/users/get", userHandler.GetUserByID)
+	mux.HandleFunc("/users/update", userHandler.UpdateUser)
 	mux.HandleFunc("/users/delete", userHandler.DeleteUser)
 
 	// wrap with middleware
