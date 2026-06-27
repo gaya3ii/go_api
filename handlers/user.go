@@ -3,10 +3,21 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 
 	"github.com/gayathriad/go_api/models"
 	"github.com/gayathriad/go_api/repository"
 )
+
+// max concurrent DB writes for a bulk request
+
+const bulkWorkerLimit = 10
+
+type bulkUserResult struct {
+	Index int         `json:"index"`
+	User  models.User `json:"user,omitempty"`
+	Error string      `json:"error,omitempty"`
+}
 
 type UserHandler struct {
 	repo repository.UserRepository
@@ -94,6 +105,75 @@ func (h *UserHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(updated)
+}
+
+// create many users concurrently via a bounded worker pool
+func (h *UserHandler) CreateUsersBulk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	var users []models.User
+	if err := json.NewDecoder(r.Body).Decode(&users); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+		return
+	}
+	if len(users) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "users array is required"})
+		return
+	}
+
+	type job struct {
+		index int
+		user  models.User
+	}
+
+	jobs := make(chan job, len(users))
+	results := make(chan bulkUserResult, len(users))
+
+	workers := bulkWorkerLimit
+	if len(users) < workers {
+		workers = len(users)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				created, err := h.repo.Create(j.user)
+				res := bulkUserResult{Index: j.index, User: created}
+				if err != nil {
+					res.Error = err.Error()
+				}
+				results <- res
+			}
+		}()
+	}
+
+	for i, u := range users {
+		jobs <- job{index: i, user: u}
+	}
+	close(jobs)
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	ordered := make([]bulkUserResult, len(users))
+	for res := range results {
+		ordered[res.Index] = res
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusMultiStatus)
+	json.NewEncoder(w).Encode(ordered)
 }
 
 // delete user
