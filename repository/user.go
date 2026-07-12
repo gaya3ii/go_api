@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"context"
+
 	"github.com/gayathriad/go_api/models"
 
 	"gorm.io/gorm"
@@ -8,11 +10,11 @@ import (
 
 // interface — contract for DB operations
 type UserRepository interface {
-	GetAll() ([]models.User, error)
-	Create(user models.User) (models.User, error)
-	Delete(id string) error
-	GetByID(id string) (models.User, error)
-	Update(user models.User) (models.User, error)
+	GetAll(ctx context.Context) ([]models.User, error)
+	Create(ctx context.Context, user models.User) (models.User, error)
+	Delete(ctx context.Context, id string) error
+	GetByID(ctx context.Context, id string) (models.User, error)
+	Update(ctx context.Context, user models.User) (models.User, error)
 }
 
 // actual implementation
@@ -26,32 +28,32 @@ func NewUserRepo(db *gorm.DB) UserRepository {
 }
 
 // get all users
-func (r *userRepo) GetAll() ([]models.User, error) {
+func (r *userRepo) GetAll(ctx context.Context) ([]models.User, error) {
 	var users []models.User
-	result := r.db.Find(&users)
+	result := r.db.WithContext(ctx).Find(&users)
 	return users, result.Error
 }
 
 // create user
-func (r *userRepo) Create(user models.User) (models.User, error) {
-	result := r.db.Create(&user)
+func (r *userRepo) Create(ctx context.Context, user models.User) (models.User, error) {
+	result := r.db.WithContext(ctx).Create(&user)
 	return user, result.Error
 }
 
 // delete user
-func (r *userRepo) Delete(id string) error {
-	result := r.db.Unscoped().Delete(&models.User{}, "id = ?", id)
+func (r *userRepo) Delete(ctx context.Context, id string) error {
+	result := r.db.WithContext(ctx).Unscoped().Delete(&models.User{}, "id = ?", id)
 	return result.Error
 }
 
-func (r *userRepo) GetByID(id string) (models.User, error) {
+func (r *userRepo) GetByID(ctx context.Context, id string) (models.User, error) {
 	var user models.User
-	result := r.db.First(&user, "id = ?", id)
+	result := r.db.WithContext(ctx).First(&user, "id = ?", id)
 	return user, result.Error
 }
 
 // update user
-func (r *userRepo) Update(user models.User) (models.User, error) {
-	result := r.db.Save(&user)
+func (r *userRepo) Update(ctx context.Context, user models.User) (models.User, error) {
+	result := r.db.WithContext(ctx).Save(&user)
 	return user, result.Error
 }

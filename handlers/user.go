@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"sync"
 
@@ -27,103 +28,117 @@ func NewUserHandler(repo repository.UserRepository) *UserHandler {
 	return &UserHandler{repo: repo}
 }
 
-// get all users
-func (h *UserHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := h.repo.GetAll()
+// writeJSON marshals data and writes it to the response, along with the
+// given status code. If marshaling fails, it falls back to a 500 error.
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	body, err := json.Marshal(data)
 	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		w.Write([]byte(`{"error":"failed to encode response"}`))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(users)
+	w.WriteHeader(status)
+	w.Write(body)
+}
+
+// readJSON reads and unmarshals the request body into v. It writes a 400
+// error response and returns false if reading or parsing fails.
+func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"failed to read body"}`))
+		return false
+	}
+	if err := json.Unmarshal(body, v); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"invalid body"}`))
+		return false
+	}
+	return true
+}
+
+// get all users
+func (h *UserHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := h.repo.GetAll(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, users)
 }
 
 // create user
 func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var user models.User
-	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+	if !readJSON(w, r, &user) {
 		return
 	}
-	created, err := h.repo.Create(user)
+	created, err := h.repo.Create(r.Context(), user)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(created)
+	writeJSON(w, http.StatusCreated, created)
 }
 
 // get user by id
 func (h *UserHandler) GetUserByID(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "id is required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
 		return
 	}
-	user, err := h.repo.GetByID(id)
+	user, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	writeJSON(w, http.StatusOK, user)
 }
 
 // update user
 func (h *UserHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "id is required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
 		return
 	}
 	// check user exists
-	existing, err := h.repo.GetByID(id)
+	existing, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 		return
 	}
 	// decode new values
-	if err := json.NewDecoder(r.Body).Decode(&existing); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+	if !readJSON(w, r, &existing) {
 		return
 	}
-	updated, err := h.repo.Update(existing)
+	updated, err := h.repo.Update(r.Context(), existing)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(updated)
+	writeJSON(w, http.StatusOK, updated)
 }
 
 // create many users concurrently via a bounded worker pool
 func (h *UserHandler) CreateUsersBulk(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]string{"error": "method not allowed"})
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 
 	var users []models.User
-	if err := json.NewDecoder(r.Body).Decode(&users); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"})
+	if !readJSON(w, r, &users) {
 		return
 	}
 	if len(users) == 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "users array is required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "users array is required"})
 		return
 	}
 
@@ -140,13 +155,15 @@ func (h *UserHandler) CreateUsersBulk(w http.ResponseWriter, r *http.Request) {
 		workers = len(users)
 	}
 
+	ctx := r.Context()
+
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				created, err := h.repo.Create(j.user)
+				created, err := h.repo.Create(ctx, j.user)
 				res := bulkUserResult{Index: j.index, User: created}
 				if err != nil {
 					res.Error = err.Error()
@@ -171,22 +188,18 @@ func (h *UserHandler) CreateUsersBulk(w http.ResponseWriter, r *http.Request) {
 		ordered[res.Index] = res
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusMultiStatus)
-	json.NewEncoder(w).Encode(ordered)
+	writeJSON(w, http.StatusMultiStatus, ordered)
 }
 
 // delete user
 func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "id is required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
 		return
 	}
-	if err := h.repo.Delete(id); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	if err := h.repo.Delete(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
