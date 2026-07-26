@@ -50,6 +50,10 @@ docker run -p 8080:8080 \
 
 Starts the API and a PostgreSQL database together.
 
+Requires a `.env` file in this directory with `DB_PASSWORD` set — Compose reads
+it automatically to fill in `${DB_PASSWORD}` in [docker-compose.yml](docker-compose.yml). No
+sourcing/exporting needed, just the file being present.
+
 ```bash
 # Build and start all services
 docker compose up --build
