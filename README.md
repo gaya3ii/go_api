@@ -17,7 +17,7 @@ A REST API built with Go and PostgreSQL, containerized with Docker.
 go mod download
 
 # Run the server
-go run main.go
+go run ./cmd/app
 ```
 
 ---
@@ -112,10 +112,17 @@ curl -X DELETE "http://localhost:8080/users/delete?id=<uuid>"
 
 ## Environment Variables
 
-| Variable      | Default    | Description              |
-|---------------|------------|--------------------------|
-| `DB_HOST`     | —          | PostgreSQL host          |
-| `DB_USER`     | `postgres` | PostgreSQL user          |
-| `DB_PASSWORD` | `password` | PostgreSQL password      |
-| `DB_NAME`     | `goapi`    | PostgreSQL database name |
-| `DB_PORT`     | `5432`     | PostgreSQL port          |
+| Variable      | Default     | Description              |
+|---------------|-------------|---------------------------|
+| `DB_HOST`     | `localhost` | PostgreSQL host          |
+| `DB_USER`     | — required  | PostgreSQL user          |
+| `DB_PASSWORD` | — required  | PostgreSQL password      |
+| `DB_NAME`     | — required  | PostgreSQL database name |
+| `DB_PORT`     | `5432`      | PostgreSQL port          |
+
+For `DB_USER`, `DB_PASSWORD`, and `DB_NAME` when running locally (outside Docker/Kubernetes), export the values from
+`.env` first:
+
+```bash
+set -a; source .env; set +a
+```
